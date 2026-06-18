@@ -10,7 +10,6 @@ from database.connection import get_pool, close_pool
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 启动时
     ensure_cache_dirs()
     await get_pool()
     print(f"✅ 数据库连接池已初始化")
