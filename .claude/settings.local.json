@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile backend/crawler/mock_data.py)",
+      "Bash(python -m py_compile backend/api/routes.py)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from main import app; print\\('App loaded OK'\\); print\\('Routes:', [r.path for r in app.routes if hasattr\\(r, 'path'\\)]\\)\")",
+      "Bash(venv/Scripts/python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(venv/Scripts/pip install *)",
+      "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(venv/Scripts/python -c \"import qrcode; print\\('qrcode OK from venv python'\\)\")",
+      "Bash(venv/Scripts/python -c \"from main import app; print\\('App loaded OK'\\); print\\('Routes:', [r.path for r in app.routes if hasattr\\(r, 'path'\\)]\\)\")",
+      "Bash(venv/Scripts/python -c ' *)"
+    ]
+  }
+}

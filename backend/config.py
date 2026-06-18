@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     
     # 日志
     log_level: str = "INFO"
+
+    # Mock模式（MediaCrawler不可用时使用模拟数据）
+    use_mock_crawler: bool = False
     
     class Config:
         env_file = ".env"

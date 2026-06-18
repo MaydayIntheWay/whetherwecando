@@ -1,6 +1,7 @@
 """
 API路由定义
 """
+import os
 import uuid
 import asyncio
 from datetime import datetime
@@ -11,15 +12,21 @@ from models import (
     ProductInput, CleanedItem, SSEEvent,
     ValidationReport
 )
-from crawler import XiaohongshuCrawler, ZhihuCrawler, crawl_keywords_parallel
 from cleaner import DataCleaner
 from agents import (
-    extract_keywords, analyze_demand,
+    extract_from_idea, extract_keywords, analyze_demand,
     analyze_feasibility, analyze_differentiation,
     analyze_risks
 )
 from report import generate_report
 from database.connection import fetch_one, execute_query
+
+USE_MOCK_CRAWLER = os.getenv("USE_MOCK_CRAWLER", "false").lower() in ("true", "1", "yes")
+
+if not USE_MOCK_CRAWLER:
+    from crawler import XiaohongshuCrawler, ZhihuCrawler, crawl_keywords_parallel
+else:
+    from crawler.mock_data import generate_mock_data
 
 router = APIRouter()
 
@@ -108,11 +115,11 @@ async def get_report(task_id: str):
         "SELECT * FROM validation_reports WHERE task_id = $1",
         task_id
     )
-    
+
     if not report:
         raise HTTPException(status_code=404, detail="报告不存在")
-    
-    return report
+
+    return dict(report)
 
 
 def _sse_event(event: SSEEvent) -> str:
@@ -133,16 +140,16 @@ async def run_validation(task_id: str, input_data: ProductInput):
                 input_data.keywords = extracted.keywords
         
         keywords = await extract_keywords(input_data)
-        
-        xhs_crawler = XiaohongshuCrawler()
-        zhihu_crawler = ZhihuCrawler()
-        
-        xhs_task = crawl_keywords_parallel(xhs_crawler, keywords, 20, 2)
-        zhihu_task = crawl_keywords_parallel(zhihu_crawler, keywords, 10, 2)
-        
-        xhs_data, zhihu_data = await asyncio.gather(xhs_task, zhihu_task)
-        
-        all_data = xhs_data + zhihu_data
+
+        if USE_MOCK_CRAWLER:
+            all_data = generate_mock_data(keywords, items_per_keyword=10)
+        else:
+            xhs_crawler = XiaohongshuCrawler()
+            zhihu_crawler = ZhihuCrawler()
+            xhs_task = crawl_keywords_parallel(xhs_crawler, keywords, 20, 2)
+            zhihu_task = crawl_keywords_parallel(zhihu_crawler, keywords, 10, 2)
+            xhs_data, zhihu_data = await asyncio.gather(xhs_task, zhihu_task)
+            all_data = xhs_data + zhihu_data
         
         cleaner = DataCleaner()
         cleaned_data = cleaner.clean(all_data)
@@ -183,21 +190,19 @@ async def run_validation(task_id: str, input_data: ProductInput):
 
 async def _save_report(report: ValidationReport):
     """保存报告到数据库"""
-    import json
-    
     await execute_query(
         """
-        INSERT INTO validation_reports 
+        INSERT INTO validation_reports
         (task_id, verdict, verdict_reason, demand, feasibility, differentiation, risks, demand_heatmap, data_stats)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         """,
         report.task_id,
         report.verdict,
         report.verdict_reason,
-        json.dumps(report.demand.model_dump()) if report.demand else None,
-        json.dumps(report.feasibility.model_dump()) if report.feasibility else None,
-        json.dumps(report.differentiation.model_dump()) if report.differentiation else None,
-        json.dumps(report.risks.model_dump()) if report.risks else None,
-        json.dumps(report.demand_heatmap) if report.demand_heatmap else None,
-        json.dumps(report.data_stats) if report.data_stats else None
+        report.demand.model_dump() if report.demand else None,
+        report.feasibility.model_dump() if report.feasibility else None,
+        report.differentiation.model_dump() if report.differentiation else None,
+        report.risks.model_dump() if report.risks else None,
+        report.demand_heatmap,
+        report.data_stats,
     )
