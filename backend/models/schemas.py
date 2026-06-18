@@ -7,9 +7,9 @@ from pydantic import BaseModel, Field
 
 class ProductInput(BaseModel):
     """产品输入表单"""
-    problem: str = Field(..., description="用户观察到的痛点")
-    solution: str = Field(..., description="解决方案描述")
-    target_user: str = Field(..., description="目标用户")
+    problem: str = Field(default="", description="用户观察到的痛点")
+    solution: str = Field(default="", description="解决方案描述")
+    target_user: str = Field(default="", description="目标用户")
     known_competitors: list[str] = Field(default_factory=list, description="已知竞品")
     business_model: str = Field(default="", description="商业模式")
     keywords: list[str] = Field(default_factory=list, description="搜索关键词")

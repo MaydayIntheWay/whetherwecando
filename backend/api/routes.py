@@ -124,6 +124,14 @@ def _sse_event(event: SSEEvent) -> str:
 async def run_validation(task_id: str, input_data: ProductInput):
     """执行验证流程"""
     try:
+        if input_data.raw_data and not input_data.problem:
+            extracted = await extract_from_idea(input_data.raw_data)
+            input_data.problem = extracted.problem
+            input_data.solution = extracted.solution
+            input_data.target_user = extracted.target_user
+            if not input_data.keywords:
+                input_data.keywords = extracted.keywords
+        
         keywords = await extract_keywords(input_data)
         
         xhs_crawler = XiaohongshuCrawler()
