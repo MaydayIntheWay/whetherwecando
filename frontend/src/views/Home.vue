@@ -8,7 +8,7 @@
         <div 
           class="card" 
           :class="{ active: mode === 'idea' }"
-          @click="mode = 'idea'"
+          @click="switchMode('idea')"
         >
           <div class="card-icon">💡</div>
           <h3>描述灵感</h3>
@@ -18,7 +18,7 @@
         <div 
           class="card"
           :class="{ active: mode === 'form' }"
-          @click="mode = 'form'"
+          @click="switchMode('form')"
         >
           <div class="card-icon">📝</div>
           <h3>填写表单</h3>
@@ -35,9 +35,9 @@
         <button 
           class="btn-primary"
           @click="submitIdea"
-          :disabled="!rawIdea.trim()"
+          :disabled="!rawIdea.trim() || loading"
         >
-          提炼关键词
+          {{ loading ? '提取中...' : '提炼关键词' }}
         </button>
       </div>
       
@@ -79,9 +79,9 @@
         <button 
           class="btn-primary"
           @click="submitForm"
-          :disabled="!isFormValid"
+          :disabled="!isFormValid || loading"
         >
-          提取关键词
+          {{ loading ? '提取中...' : '提取关键词' }}
         </button>
       </div>
       
@@ -137,7 +137,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -154,6 +154,7 @@ const showConfirm = ref(false)
 const confirmData = ref({})
 const keywords = ref([])
 const newKeyword = ref('')
+const loading = ref(false)
 
 const isFormValid = computed(() => {
   return form.value.problem.trim() && 
@@ -161,46 +162,63 @@ const isFormValid = computed(() => {
          form.value.targetUser.trim()
 })
 
+function switchMode(newMode) {
+  mode.value = newMode
+  showConfirm.value = false
+  confirmData.value = {}
+  keywords.value = []
+}
+
 async function submitIdea() {
+  loading.value = true
   try {
-    const res = await fetch('/api/validate', {
+    const res = await fetch('/api/extract/idea', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw_idea: rawIdea.value })
+    })
+    const data = await res.json()
+    
+    confirmData.value = {
+      problem: data.problem,
+      solution: data.solution,
+      targetUser: data.target_user
+    }
+    keywords.value = data.keywords || []
+    showConfirm.value = true
+  } catch (e) {
+    alert('提取失败：' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function submitForm() {
+  loading.value = true
+  try {
+    const res = await fetch('/api/extract/keywords', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        problem: '',
-        solution: '',
-        targetUser: '',
-        raw_data: rawIdea.value
+        problem: form.value.problem,
+        solution: form.value.solution,
+        target_user: form.value.targetUser
       })
     })
     const data = await res.json()
+    
     confirmData.value = {
-      problem: 'AI提炼中...',
-      solution: 'AI提炼中...',
-      targetUser: 'AI提炼中...'
+      problem: form.value.problem,
+      solution: form.value.solution,
+      targetUser: form.value.targetUser
     }
-    keywords.value = ['关键词提取中...']
+    keywords.value = data.keywords || []
     showConfirm.value = true
   } catch (e) {
-    alert('提交失败：' + e.message)
+    alert('提取失败：' + e.message)
+  } finally {
+    loading.value = false
   }
-}
-
-function submitForm() {
-  confirmData.value = {
-    problem: form.value.problem,
-    solution: form.value.solution,
-    targetUser: form.value.targetUser
-  }
-  keywords.value = extractKeywordsFromForm()
-  showConfirm.value = true
-}
-
-function extractKeywordsFromForm() {
-  const words = []
-  const text = `${form.value.problem} ${form.value.solution} ${form.value.targetUser}`
-  const matches = text.match(/[\u4e00-\u9fa5]{2,4}/g) || []
-  return [...new Set(matches)].slice(0, 8)
 }
 
 function removeKeyword(idx) {

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings, ensure_cache_dirs
 from database.connection import get_pool, close_pool
 from api import router
+from api.extract import router as extract_router
 
 
 @asynccontextmanager
@@ -39,6 +40,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(extract_router)
 
 
 @app.get("/")
