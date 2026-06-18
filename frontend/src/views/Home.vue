@@ -1,5 +1,19 @@
 <template>
   <div class="home">
+    <nav class="nav-bar">
+      <div class="nav-container">
+        <router-link to="/" class="nav-logo">Idea验证工具</router-link>
+        <div class="nav-links">
+          <router-link to="/crawler/auth" class="nav-link">
+            🔧 爬虫配置
+          </router-link>
+          <router-link to="/crawler/task" class="nav-link">
+            📊 爬取任务
+          </router-link>
+        </div>
+      </div>
+    </nav>
+    
     <div class="container">
       <h1 class="title">Idea 可行性验证工具</h1>
       <p class="subtitle">验证你的产品创意是否值得投入</p>
@@ -256,12 +270,60 @@ async function startValidation() {
 .home {
   min-height: 100vh;
   background: #F5F5F7;
-  padding: 40px 20px;
+  padding: 0;
+}
+
+.nav-bar {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  padding: 0 20px;
+}
+
+.nav-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 56px;
+}
+
+.nav-logo {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1d1d1f;
+  text-decoration: none;
+}
+
+.nav-links {
+  display: flex;
+  gap: 24px;
+}
+
+.nav-link {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1d1d1f;
+  text-decoration: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.nav-link:hover {
+  background: rgba(0, 122, 255, 0.1);
+  color: #007AFF;
 }
 
 .container {
   max-width: 800px;
   margin: 0 auto;
+  padding: 40px 20px;
 }
 
 .title {

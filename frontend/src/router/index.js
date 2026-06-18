@@ -15,6 +15,16 @@ const routes = [
     path: '/report/:task_id',
     name: 'Report',
     component: () => import('../views/Report.vue')
+  },
+  {
+    path: '/crawler/auth',
+    name: 'CrawlerAuth',
+    component: () => import('../views/CrawlerAuth.vue')
+  },
+  {
+    path: '/crawler/task',
+    name: 'CrawlerTask',
+    component: () => import('../views/CrawlerTask.vue')
   }
 ]
 

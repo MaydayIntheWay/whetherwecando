@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # MediaCrawler
     cookie_path: str = "./cache/cookies"
     cache_path: str = "./cache"
+    crawler_encryption_key: str = ""
     
     # 服务
     api_host: str = "0.0.0.0"

@@ -8,6 +8,9 @@ from config import settings, ensure_cache_dirs
 from database.connection import get_pool, close_pool
 from api import router
 from api.extract import router as extract_router
+from api.crawler_routes import router as crawler_router
+from fastapi import WebSocket
+from api.crawler_ws import websocket_endpoint
 
 
 @asynccontextmanager
@@ -41,6 +44,12 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(extract_router)
+app.include_router(crawler_router)
+
+
+@app.websocket("/api/crawler/ws/{task_id}")
+async def crawler_websocket(websocket: WebSocket, task_id: str):
+    await websocket_endpoint(websocket, task_id)
 
 
 @app.get("/")
