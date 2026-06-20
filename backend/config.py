@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # 日志
     log_level: str = "INFO"
 
+    # 爬虫配置
+    crawler_headless: bool = True
+
     # Mock模式（MediaCrawler不可用时使用模拟数据）
     use_mock_crawler: bool = False
     

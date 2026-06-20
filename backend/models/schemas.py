@@ -14,7 +14,7 @@ class ProductInput(BaseModel):
     business_model: str = Field(default="", description="商业模式")
     keywords: list[str] = Field(default_factory=list, description="搜索关键词")
     raw_prd: str = Field(default="", description="PRD原文")
-    raw_data: str = Field(default="", description="自然语言灵感描述")
+    raw_idea: str = Field(default="", description="自然语言灵感描述")
 
 
 class CleanedItem(BaseModel):

@@ -174,6 +174,26 @@ class AuthManager:
                     message=f"验证失败：{str(e)}"
                 )
     
+    async def get_all_configs(self) -> list[dict]:
+        """获取所有平台的配置摘要（不含原始 cookie）"""
+        query = """
+        SELECT platform, login_type, status, last_validated_at, expires_at
+        FROM crawler_auth_config
+        ORDER BY platform
+        """
+        async with self.db_pool.acquire() as conn:
+            rows = await conn.fetch(query)
+            return [
+                {
+                    "platform": row["platform"],
+                    "login_type": row["login_type"],
+                    "status": row["status"],
+                    "last_validated_at": row["last_validated_at"].isoformat() if row["last_validated_at"] else None,
+                    "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
+                }
+                for row in rows
+            ]
+
     async def get_decrypted_cookie(self, platform: Platform) -> Optional[str]:
         query = """
         SELECT encrypted_cookie, status
@@ -197,6 +217,15 @@ class AuthManager:
     async def _validate_cookie_with_platform(
         self, platform: str, cookie: str
     ) -> bool:
-        if len(cookie) < 10:
+        """本地格式校验（真实验证依赖平台 API 在爬虫运行时完成）"""
+        if not cookie or len(cookie.strip()) < 20:
             return False
-        return True
+        # 检查是否为 key=value; key=value 格式
+        if "=" not in cookie:
+            return False
+        # 至少要有几个常见字段
+        pairs = [p.strip() for p in cookie.split(";") if p.strip()]
+        if len(pairs) < 2:
+            return False
+        has_key = any("=" in p and p.split("=", 1)[0].strip() for p in pairs)
+        return has_key

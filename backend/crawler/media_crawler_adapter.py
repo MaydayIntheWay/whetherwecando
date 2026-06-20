@@ -63,13 +63,9 @@ class MediaCrawlerAdapter:
             raise ValueError(f"{platform_name}登录态未配置或已失效")
 
         temp_dir = tempfile.mkdtemp(prefix=f"media_crawler_{platform_code}_")
+        print(f"[ADAPTER] 开始爬取 {platform_name} (关键词: {keyword})", flush=True)
 
         try:
-            if progress_callback:
-                await progress_callback(
-                    current=0, total=max_count, message="正在启动浏览器..."
-                )
-
             await self.runner.run_crawler(
                 media_crawler_dir=self.media_crawler_dir,
                 platform=platform_code,
@@ -80,15 +76,11 @@ class MediaCrawlerAdapter:
                 progress_callback=progress_callback,
             )
 
-            if progress_callback:
-                await progress_callback(
-                    current=0, total=max_count, message="正在读取爬取结果..."
-                )
-
             raw_data_list = await self.output_capture.capture_output(
                 output_dir=temp_dir,
                 platform=platform_code,
             )
+            print(f"[ADAPTER] {platform_name} 原始数据: {len(raw_data_list)} 条", flush=True)
 
             cleaned_items = []
             for i, raw_data in enumerate(raw_data_list):
@@ -99,13 +91,7 @@ class MediaCrawlerAdapter:
                 if item and item.source_url:
                     cleaned_items.append(item.model_dump())
 
-                if progress_callback and raw_data_list:
-                    await progress_callback(
-                        current=i + 1,
-                        total=len(raw_data_list),
-                        message=f"已处理 {i + 1}/{len(raw_data_list)} 条",
-                    )
-
+            print(f"[ADAPTER] {platform_name} 有效数据: {len(cleaned_items)} 条 (关键词: {keyword})", flush=True)
             return cleaned_items
 
         finally:

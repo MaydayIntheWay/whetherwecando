@@ -1,5 +1,8 @@
 """
-MediaCrawler爬虫运行器 — 通过子进程调用MediaCrawler，使用CLI参数注入配置
+MediaCrawler爬虫运行器 — 通过子进程调用MediaCrawler
+
+绕过 app_runner.run() 的信号处理（Windows 上 signal.SIGTERM 不存在会导致崩溃），
+改用 asyncio.run() 直接运行 main() + async_cleanup()。
 """
 import asyncio
 import sys
@@ -12,8 +15,8 @@ from typing import Optional, Callable
 
 class MediaCrawlerRunner:
     def __init__(self):
-        self.timeout = 120
-        self.retry_times = 3
+        self.timeout = 300
+        self.retry_times = 2
         self.retry_interval = 10
 
     async def run_crawler(
@@ -66,45 +69,59 @@ class MediaCrawlerRunner:
         max_count: int,
         output_dir: str,
     ) -> bool:
-        config_json_path = os.path.join(output_dir, "mc_config.json")
-        with open(config_json_path, "w", encoding="utf-8") as f:
-            json.dump({
-                "PLATFORM": platform,
-                "KEYWORDS": keyword,
-                "LOGIN_TYPE": "cookie",
-                "COOKIES": cookie,
-                "CRAWLER_TYPE": "search",
-                "CRAWLER_MAX_NOTES_COUNT": max_count,
-                "HEADLESS": True,
-                "ENABLE_CDP_MODE": False,
-                "CDP_CONNECT_EXISTING": False,
-                "SAVE_LOGIN_STATE": False,
-                "SAVE_DATA_OPTION": "jsonl",
-                "SAVE_DATA_PATH": output_dir,
-                "ENABLE_GET_COMMENTS": False,
-                "ENABLE_GET_SUB_COMMENTS": False,
-                "ENABLE_IP_PROXY": False,
-                "START_PAGE": 1,
-                "MAX_CONCURRENCY_NUM": 1,
-            }, f)
+        mc_dir = os.path.abspath(media_crawler_dir)
+        runner_script_path = os.path.join(output_dir, "_mc_runner.py")
 
-        # Run MediaCrawler by patching config before import.
-        # We use a subprocess with -c to ensure a clean module state.
-        script = (
-            "import sys, json, os\n"
-            f"sys.path.insert(0, {_escape_py_str(media_crawler_dir)})\n"
-            "with open(" + _escape_py_str(config_json_path) + ") as _f:\n"
-            "    _overrides = json.load(_f)\n"
-            "import config\n"
-            "for _k, _v in _overrides.items():\n"
-            "    setattr(config, _k, _v)\n"
-            "from tools.app_runner import run\n"
-            "from main import main, async_cleanup\n"
-            "run(main, async_cleanup, cleanup_timeout_seconds=15.0)\n"
-        )
+        headless_bool = os.environ.get("CRAWLER_HEADLESS", "true").lower() not in ("false", "0", "no")
+
+        with open(runner_script_path, "w", encoding="utf-8") as f:
+            f.write(f'''\
+import sys, os
+sys.path.insert(0, {json.dumps(mc_dir)})
+# 清理 argv 避免 Typer 解析垃圾参数导致 SystemExit
+sys.argv = [sys.argv[0]]
+
+import config
+
+# 在导入任何 MediaCrawler 模块之前设置所有配置
+config.PLATFORM = {json.dumps(platform)}
+config.KEYWORDS = {json.dumps(keyword)}
+config.LOGIN_TYPE = "cookie"
+config.COOKIES = {json.dumps(cookie)}
+config.CRAWLER_TYPE = "search"
+config.CRAWLER_MAX_NOTES_COUNT = {max_count}
+config.HEADLESS = {headless_bool}
+config.ENABLE_CDP_MODE = False
+config.CDP_CONNECT_EXISTING = False
+config.CDP_HEADLESS = True
+config.AUTO_CLOSE_BROWSER = True
+config.SAVE_LOGIN_STATE = False
+config.SAVE_DATA_OPTION = "jsonl"
+config.SAVE_DATA_PATH = {json.dumps(output_dir)}
+config.ENABLE_GET_COMMENTS = False
+config.ENABLE_GET_SUB_COMMENTS = False
+config.ENABLE_GET_MEIDAS = False
+config.ENABLE_GET_WORDCLOUD = False
+config.ENABLE_IP_PROXY = False
+config.START_PAGE = 1
+config.MAX_CONCURRENCY_NUM = 1
+
+import asyncio
+from main import main, async_cleanup
+
+
+async def _run():
+    try:
+        await main()
+    finally:
+        await async_cleanup()
+
+
+asyncio.run(_run())
+''')
 
         process = await asyncio.create_subprocess_exec(
-            sys.executable, "-c", script,
+            sys.executable, runner_script_path,
             cwd=media_crawler_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -120,7 +137,7 @@ class MediaCrawlerRunner:
                 error_msg = stderr.decode("utf-8", errors="ignore")
                 stdout_msg = stdout.decode("utf-8", errors="ignore")
                 raise RuntimeError(
-                    f"爬虫执行失败（exit={process.returncode}）：{error_msg}\n{stdout_msg}"
+                    f"爬虫执行失败（exit={process.returncode}）：{error_msg}\\n{stdout_msg}"
                 )
 
             return True
@@ -132,10 +149,3 @@ class MediaCrawlerRunner:
     async def _random_delay(self):
         delay = random.uniform(2, 5)
         await asyncio.sleep(delay)
-
-
-def _escape_py_str(s: str) -> str:
-    return json.dumps(s)
-
-
-crawler_runner = MediaCrawlerRunner()

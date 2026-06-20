@@ -1,7 +1,7 @@
 """
 MediaCrawler输出捕获器
 从MediaCrawler生成的jsonl文件中读取爬取结果。
-MediaCrawler输出路径: {save_path}/{platform}/jsonl/search_notes_{date}.jsonl
+MediaCrawler输出路径: {save_path}/{platform}/jsonl/search_contents_{date}.jsonl
 """
 import asyncio
 import glob
@@ -41,7 +41,7 @@ class MediaCrawlerOutputCapture:
     async def _find_output_file(self, output_dir: str, platform: str) -> Optional[str]:
         # MediaCrawler saves to: {SAVE_DATA_PATH}/{platform}/jsonl/search_notes_{date}.jsonl
         search_dir = Path(output_dir) / platform / "jsonl"
-        pattern = str(search_dir / "search_notes_*.jsonl")
+        pattern = str(search_dir / "search_contents_*.jsonl")
 
         for _ in range(self.wait_timeout):
             matches = glob.glob(pattern)

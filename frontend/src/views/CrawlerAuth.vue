@@ -13,32 +13,44 @@
         </div>
       </div>
     </nav>
-    
+
     <div class="auth-container">
       <h1 class="title">爬虫登录态配置</h1>
       <p class="subtitle">配置平台Cookie后，即可开始爬取数据</p>
-      
-      <div class="platform-selector">
-        <button 
-          :class="['platform-btn', { active: platform === 'xiaohongshu' }]"
-          @click="switchPlatform('xiaohongshu')"
+
+      <!-- 各平台配置状态卡片 -->
+      <div class="platform-configs">
+        <div
+          v-for="p in platforms"
+          :key="p.key"
+          class="platform-config-card"
+          :class="platformCardClass(p.key)"
         >
-          <span class="platform-icon">📱</span>
-          <span>小红书</span>
-        </button>
-        <button 
-          :class="['platform-btn', { active: platform === 'zhihu' }]"
-          @click="switchPlatform('zhihu')"
-        >
-          <span class="platform-icon">💬</span>
-          <span>知乎</span>
-        </button>
+          <div class="config-card-header">
+            <span class="config-platform-icon">{{ p.icon }}</span>
+            <h3>{{ p.name }}</h3>
+            <span class="config-status-badge" :class="platformCardClass(p.key)">
+              {{ platformStatusText(p.key) }}
+            </span>
+          </div>
+          <p v-if="getConfig(p.key)" class="config-meta">
+            <span v-if="getConfig(p.key).last_validated_at">
+              📅 最后验证：{{ formatDate(getConfig(p.key).last_validated_at) }}
+            </span>
+            <span v-if="getConfig(p.key).expires_at">
+              · 过期时间：{{ formatDate(getConfig(p.key).expires_at) }}
+            </span>
+          </p>
+          <p v-else class="config-meta no-config">
+            尚未配置登录态
+          </p>
+        </div>
       </div>
-      
+
       <div class="tutorial-card">
         <h3>📋 如何获取{{ platformName }}的Cookie？</h3>
         <p class="tutorial-intro">按照以下步骤操作，即可轻松获取Cookie</p>
-        
+
         <div class="steps">
           <div class="step">
             <div class="step-number">1</div>
@@ -47,7 +59,7 @@
               <p>在电脑上打开{{ platformName }}网站并登录，然后按 <kbd>F12</kbd> 或右键选择"检查"</p>
             </div>
           </div>
-          
+
           <div class="step">
             <div class="step-number">2</div>
             <div class="step-content">
@@ -56,7 +68,7 @@
               <img src="/2.png" alt="切换到Network标签" class="step-image" />
             </div>
           </div>
-          
+
           <div class="step">
             <div class="step-number">3</div>
             <div class="step-content">
@@ -64,7 +76,7 @@
               <p>按 <kbd>F5</kbd> 或 <kbd>Ctrl+R</kbd> 刷新页面，让Network捕获请求</p>
             </div>
           </div>
-          
+
           <div class="step">
             <div class="step-number">4</div>
             <div class="step-content">
@@ -73,7 +85,7 @@
               <img src="/4.png" alt="找到第一个请求" class="step-image" />
             </div>
           </div>
-          
+
           <div class="step">
             <div class="step-number">5</div>
             <div class="step-content">
@@ -85,7 +97,7 @@
               </div>
             </div>
           </div>
-          
+
           <div class="step">
             <div class="step-number">6</div>
             <div class="step-content">
@@ -95,11 +107,24 @@
           </div>
         </div>
       </div>
-      
+
+      <!-- 平台选择 -->
+      <div class="platform-selector">
+        <button
+          :class="['platform-btn', { active: platform === p.key }]"
+          v-for="p in platforms"
+          :key="p.key"
+          @click="switchPlatform(p.key)"
+        >
+          <span class="platform-icon">{{ p.icon }}</span>
+          <span>{{ p.name }}</span>
+        </button>
+      </div>
+
       <div class="cookie-form">
         <div class="form-group">
           <label>Cookie值 <span class="required">*</span></label>
-          <textarea 
+          <textarea
             v-model="cookieValue"
             placeholder="请粘贴从浏览器复制的Cookie值..."
             rows="6"
@@ -111,23 +136,6 @@
           {{ loading ? '配置中...' : '提交配置' }}
         </button>
       </div>
-      
-      <div v-if="authStatus" class="status-card" :class="authStatus.status">
-        <div class="status-header">
-          <span class="status-icon">{{ statusIcon }}</span>
-          <h3>登录态状态</h3>
-        </div>
-        <p class="status-text">
-          {{ statusText }}
-        </p>
-        <p v-if="authStatus.expires_at" class="status-expires">
-          <span class="expires-icon">📅</span>
-          过期时间：{{ formatDate(authStatus.expires_at) }}
-        </p>
-        <button v-if="authStatus.status !== 'valid'" class="retry-btn" @click="retryConfig">
-          重新配置
-        </button>
-      </div>
     </div>
   </div>
 </template>
@@ -136,45 +144,61 @@
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 
+const platforms = [
+  { key: 'xiaohongshu', name: '小红书', icon: '📱' },
+  { key: 'zhihu', name: '知乎', icon: '💬' },
+]
+
 const platform = ref('xiaohongshu')
 const cookieValue = ref('')
 const loading = ref(false)
-const authStatus = ref(null)
+const configs = ref({})  // { xiaohongshu: {...}, zhihu: {...} } or empty
 
 const platformName = computed(() => {
   return platform.value === 'xiaohongshu' ? '小红书' : '知乎'
 })
 
-const statusIcon = computed(() => {
-  if (!authStatus.value) return ''
-  const iconMap = {
-    valid: '✅',
-    expiring: '⚠️',
-    expired: '❌',
-    invalid: '❌'
-  }
-  return iconMap[authStatus.value.status] || '❓'
-})
+const getConfig = (key) => configs.value[key] || null
 
-const statusText = computed(() => {
-  if (!authStatus.value) return ''
-  const statusMap = {
-    valid: '登录态有效，可以开始爬取数据',
-    expiring: '登录态即将过期，建议重新配置',
-    expired: '登录态已过期，请重新配置',
-    invalid: '登录态无效，请检查配置'
-  }
-  return statusMap[authStatus.value.status] || authStatus.value.status
-})
+const platformCardClass = (key) => {
+  const cfg = configs.value[key]
+  if (!cfg) return 'unconfigured'
+  const status = cfg.status
+  if (status === 'valid') return 'valid'
+  if (status === 'expiring') return 'expiring'
+  return 'invalid'
+}
+
+const platformStatusText = (key) => {
+  const cfg = configs.value[key]
+  if (!cfg) return '未配置'
+  const map = { valid: '有效', expiring: '即将过期', expired: '已过期', invalid: '已失效' }
+  return map[cfg.status] || cfg.status
+}
 
 const formatDate = (dateStr) => {
+  if (!dateStr) return ''
   return new Date(dateStr).toLocaleString('zh-CN')
 }
 
 const switchPlatform = (newPlatform) => {
   platform.value = newPlatform
-  authStatus.value = null
   cookieValue.value = ''
+}
+
+const loadAllConfigs = async () => {
+  try {
+    const response = await axios.get('/api/crawler/auth/configs')
+    if (response.data.success) {
+      const map = {}
+      for (const item of response.data.data) {
+        map[item.platform] = item
+      }
+      configs.value = map
+    }
+  } catch (error) {
+    console.error('查询配置列表失败：', error)
+  }
 }
 
 const submitCookie = async () => {
@@ -182,17 +206,17 @@ const submitCookie = async () => {
     alert('请输入Cookie值')
     return
   }
-  
+
   loading.value = true
   try {
     const response = await axios.post('/api/crawler/auth/config', {
       platform: platform.value,
       login_type: 'cookie',
-      cookie_value: cookieValue.value
+      cookie_value: cookieValue.value,
     })
-    
+
     if (response.data.success) {
-      await checkAuthStatus()
+      await loadAllConfigs()
       alert('✅ 配置成功！现在可以开始爬取数据了')
     } else {
       alert('❌ 配置失败：' + (response.data.error || '未知错误'))
@@ -205,24 +229,8 @@ const submitCookie = async () => {
   }
 }
 
-const checkAuthStatus = async () => {
-  try {
-    const response = await axios.get(`/api/crawler/auth/status/${platform.value}`)
-    if (response.data.success) {
-      authStatus.value = response.data.data
-    }
-  } catch (error) {
-    console.error('查询状态失败：', error)
-  }
-}
-
-const retryConfig = () => {
-  authStatus.value = null
-  cookieValue.value = ''
-}
-
 onMounted(() => {
-  checkAuthStatus()
+  loadAllConfigs()
 })
 </script>
 
@@ -306,30 +314,118 @@ onMounted(() => {
   font-size: 16px;
 }
 
-.platform-selector {
+/* Platform config status cards */
+.platform-configs {
   display: flex;
   gap: 16px;
   margin-bottom: 32px;
 }
 
+.platform-config-card {
+  flex: 1;
+  background: white;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #e5e5e7;
+}
+
+.platform-config-card.valid {
+  border-left-color: #34C759;
+}
+
+.platform-config-card.expiring {
+  border-left-color: #FF9500;
+}
+
+.platform-config-card.invalid {
+  border-left-color: #FF3B30;
+}
+
+.platform-config-card.unconfigured {
+  border-left-color: #c7c7cc;
+}
+
+.config-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.config-card-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+
+.config-platform-icon {
+  font-size: 20px;
+}
+
+.config-status-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+.config-status-badge.valid {
+  background: #e8f8ed;
+  color: #1a7f3a;
+}
+
+.config-status-badge.expiring {
+  background: #fff3cd;
+  color: #b8860b;
+}
+
+.config-status-badge.invalid {
+  background: #ffe5e5;
+  color: #cc2222;
+}
+
+.config-status-badge.unconfigured {
+  background: #f0f0f2;
+  color: #86868b;
+}
+
+.config-meta {
+  font-size: 12px;
+  color: #86868b;
+  margin: 0;
+}
+
+.config-meta.no-config {
+  color: #aeaeb2;
+}
+
+/* Platform selector */
+.platform-selector {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
 .platform-btn {
   flex: 1;
-  padding: 20px;
+  padding: 16px;
   border: 2px solid #e5e5e7;
-  border-radius: 16px;
+  border-radius: 12px;
   background: white;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .platform-icon {
-  font-size: 24px;
+  font-size: 20px;
 }
 
 .platform-btn.active {
@@ -514,78 +610,5 @@ kbd {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-.status-card {
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-  margin-top: 24px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-
-.status-card.valid {
-  border-left: 4px solid #34C759;
-}
-
-.status-card.expiring {
-  border-left: 4px solid #FF9500;
-}
-
-.status-card.expired,
-.status-card.invalid {
-  border-left: 4px solid #FF3B30;
-}
-
-.status-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.status-icon {
-  font-size: 24px;
-}
-
-.status-header h3 {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.status-text {
-  font-size: 15px;
-  color: #6e6e73;
-  margin-bottom: 8px;
-}
-
-.status-expires {
-  font-size: 14px;
-  color: #86868b;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.expires-icon {
-  font-size: 16px;
-}
-
-.retry-btn {
-  margin-top: 16px;
-  padding: 10px 20px;
-  background: #007AFF;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.retry-btn:hover {
-  background: #0051D5;
 }
 </style>

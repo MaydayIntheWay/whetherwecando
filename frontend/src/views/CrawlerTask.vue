@@ -120,37 +120,64 @@ const progressPercent = computed(() => {
   return Math.round((progress.value.current / progress.value.total) * 100)
 })
 
+let pollTimer = null
+
 const startCrawl = async () => {
   if (!keyword.value.trim()) {
     alert('请输入关键词')
     return
   }
-  
+
   loading.value = true
   results.value = []
   progress.value = null
-  
+  if (pollTimer) clearInterval(pollTimer)
+
   try {
-    const response = await axios.post('/api/crawler/crawl', {
+    // 1. 启动任务（立即返回 task_id）
+    const startRes = await axios.post('/api/crawler/crawl', {
       platform: platform.value,
       keyword: keyword.value,
       max_count: maxCount.value
     })
-    
-    if (response.data.success) {
-      const data = response.data.data
-      results.value = data.items || []
-      progress.value = {
-        current: data.success,
-        total: data.total,
-        message: '爬取完成'
-      }
-    } else {
-      alert('爬取失败：' + response.data.error)
+
+    if (!startRes.data.success) {
+      alert('启动失败：' + startRes.data.error)
+      loading.value = false
+      return
     }
+
+    const taskId = startRes.data.data.task_id
+
+    // 2. 轮询任务状态
+    pollTimer = setInterval(async () => {
+      try {
+        const pollRes = await axios.get(`/api/crawler/crawl/${taskId}`)
+        const data = pollRes.data.data
+
+        progress.value = {
+          current: data.success || 0,
+          total: data.total || 0,
+          message: data.status === 'running' ? '爬取中...' :
+                   data.status === 'completed' ? '完成' : data.status
+        }
+
+        if (data.status === 'completed') {
+          clearInterval(pollTimer)
+          results.value = data.items || []
+          loading.value = false
+        } else if (data.status === 'failed') {
+          clearInterval(pollTimer)
+          loading.value = false
+          alert('爬取失败：' + (data.error_message || '未知错误'))
+        }
+      } catch (e) {
+        console.error('Poll error:', e)
+      }
+    }, 1500)
+
   } catch (error) {
-    alert('爬取失败：' + (error.response?.data?.error || error.message))
-  } finally {
+    alert('启动失败：' + (error.response?.data?.error || error.message))
     loading.value = false
   }
 }

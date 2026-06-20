@@ -88,3 +88,7 @@ uv.lock
 
 # docs
 docs/
+
+# agent
+.codeartsdoer/
+.claude/

@@ -53,31 +53,35 @@ class TestDataTransformer:
     def test_transform_xiaohongshu_note(self):
         transformer = DataTransformer()
         note_data = {
-            'note_id': 'test123',
-            'note_desc': '这是一个测试笔记，太棒了',
-            'like_count': 100,
-            'comment_count': 20,
-            'collect_count': 30
+            "note_id": "test123",
+            "title": "测试笔记",
+            "desc": "这是一个测试笔记，太棒了",
+            "liked_count": "100",
+            "comment_count": "20",
+            "collected_count": "30",
+            "share_count": "10",
         }
         result = transformer.transform_xiaohongshu_note(note_data)
         assert result is not None
-        assert result.platform == 'xiaohongshu'
-        assert result.source_url == 'https://www.xiaohongshu.com/explore/test123'
-        assert result.engagement == 150
+        assert result.platform == "xiaohongshu"
+        assert "explore/test123" in result.source_url
+        assert result.engagement == 160
     
     def test_transform_zhihu_question(self):
         transformer = DataTransformer()
         question_data = {
-            'id': '456789',
-            'title': '测试问题',
-            'excerpt': '这是问题描述',
-            'answer_count': 50
+            "content_id": "456789",
+            "title": "测试问题",
+            "content_text": "这是问题描述，很有深度",
+            "content_url": "https://www.zhihu.com/question/456789",
+            "voteup_count": 120,
+            "comment_count": 30,
         }
         result = transformer.transform_zhihu_question(question_data)
         assert result is not None
-        assert result.platform == 'zhihu'
-        assert result.source_url == 'https://www.zhihu.com/question/456789'
-        assert result.engagement == 50
+        assert result.platform == "zhihu"
+        assert result.source_url == "https://www.zhihu.com/question/456789"
+        assert result.engagement == 150
     
     def test_filter_sensitive_info(self):
         transformer = DataTransformer()

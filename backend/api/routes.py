@@ -1,7 +1,6 @@
 """
 API路由定义
 """
-import os
 import uuid
 import asyncio
 from datetime import datetime
@@ -21,13 +20,6 @@ from agents import (
 from report import generate_report
 from database.connection import fetch_one, execute_query
 
-USE_MOCK_CRAWLER = os.getenv("USE_MOCK_CRAWLER", "false").lower() in ("true", "1", "yes")
-
-if not USE_MOCK_CRAWLER:
-    from crawler import XiaohongshuCrawler, ZhihuCrawler, crawl_keywords_parallel
-else:
-    from crawler.mock_data import generate_mock_data
-
 router = APIRouter()
 
 
@@ -46,11 +38,19 @@ async def create_validation(input_data: ProductInput):
     
     await execute_query(
         """
-        INSERT INTO product_inputs (task_id, problem, solution, target_user, keywords)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO product_inputs
+            (task_id, problem, solution, target_user, known_competitors, business_model, keywords, raw_prd, raw_idea)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         """,
-        task_id, input_data.problem, input_data.solution,
-        input_data.target_user, input_data.keywords
+        task_id,
+        input_data.problem,
+        input_data.solution,
+        input_data.target_user,
+        input_data.known_competitors,
+        input_data.business_model,
+        input_data.keywords,
+        input_data.raw_prd,
+        input_data.raw_idea,
     )
     
     asyncio.create_task(run_validation(task_id, input_data))
@@ -83,20 +83,34 @@ async def stream_validation(task_id: str):
                     break
                 
                 status = task["status"]
-                
-                if status == "done":
-                    report = await fetch_one(
-                        "SELECT * FROM validation_reports WHERE task_id = $1",
-                        task_id
+
+                if status == "crawling":
+                    # 查询已抓取的条数
+                    count_row = await fetch_one(
+                        "SELECT COUNT(*) as cnt FROM crawl_results WHERE task_id = $1",
+                        task_id,
                     )
-                    if report:
-                        yield _sse_event(SSEEvent(stage="done", message="完成"))
+                    count = count_row["cnt"] if count_row else 0
+                    yield _sse_event(SSEEvent(
+                        stage="crawling",
+                        message=f"正在抓取数据...已抓取 {count} 条",
+                        count=count,
+                    ))
+
+                elif status == "analyzing":
+                    yield _sse_event(SSEEvent(
+                        stage="analyzing",
+                        message="正在分析数据...",
+                    ))
+
+                elif status == "done":
+                    yield _sse_event(SSEEvent(stage="done", message="完成"))
                     break
-                
-                if status == "error":
+
+                elif status == "error":
                     yield _sse_event(SSEEvent(stage="error", message="验证失败"))
                     break
-                
+
                 await asyncio.sleep(1)
                 
         except Exception as e:
@@ -131,8 +145,8 @@ def _sse_event(event: SSEEvent) -> str:
 async def run_validation(task_id: str, input_data: ProductInput):
     """执行验证流程"""
     try:
-        if input_data.raw_data and not input_data.problem:
-            extracted = await extract_from_idea(input_data.raw_data)
+        if input_data.raw_idea and not input_data.problem:
+            extracted = await extract_from_idea(input_data.raw_idea)
             input_data.problem = extracted.problem
             input_data.solution = extracted.solution
             input_data.target_user = extracted.target_user
@@ -141,16 +155,18 @@ async def run_validation(task_id: str, input_data: ProductInput):
         
         keywords = await extract_keywords(input_data)
 
-        if USE_MOCK_CRAWLER:
-            all_data = generate_mock_data(keywords, items_per_keyword=10)
-        else:
-            xhs_crawler = XiaohongshuCrawler()
-            zhihu_crawler = ZhihuCrawler()
-            xhs_task = crawl_keywords_parallel(xhs_crawler, keywords, 20, 2)
-            zhihu_task = crawl_keywords_parallel(zhihu_crawler, keywords, 10, 2)
-            xhs_data, zhihu_data = await asyncio.gather(xhs_task, zhihu_task)
-            all_data = xhs_data + zhihu_data
-        
+        from crawler import crawl_keywords
+        await execute_query(
+            "UPDATE validation_tasks SET status = 'crawling' WHERE id = $1",
+            task_id,
+        )
+        all_data = await crawl_keywords(keywords, items_per_keyword=5, task_id=task_id)
+
+        await execute_query(
+            "UPDATE validation_tasks SET status = 'analyzing' WHERE id = $1",
+            task_id,
+        )
+
         cleaner = DataCleaner()
         cleaned_data = cleaner.clean(all_data)
         

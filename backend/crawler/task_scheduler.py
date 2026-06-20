@@ -28,21 +28,23 @@ class TaskScheduler:
         self.retry_times = retry_times
         self._semaphore = asyncio.Semaphore(max_concurrent)
     
-    async def execute_task(
+    async def execute_task_with_id(
         self,
+        task_id: str,
         platform: Platform,
         keyword: str,
         max_count: int = 50,
         progress_callback: Optional[Callable] = None
-    ) -> CrawlResult:
-        task_id = str(uuid4())
-        
+    ):
+        """异步执行爬取任务（使用指定的 task_id，结果写入 DB）"""
         async with self._semaphore:
             await self._create_task_record(task_id, platform, keyword, max_count)
-            
+
             try:
                 await self._update_task_status(task_id, TaskStatus.RUNNING)
-                
+                await self._log_info(task_id, f"开始爬取 {platform.value} / {keyword}")
+                print(f"[SCHEDULER] 开始: {platform.value} / {keyword}", flush=True)
+
                 raw_data_list = await self._retry_with_backoff(
                     self.adapter.crawl,
                     platform,
@@ -50,36 +52,39 @@ class TaskScheduler:
                     max_count,
                     progress_callback
                 )
-                
-                cleaned_items = self.transformer.transform_batch(
-                    raw_data_list,
-                    platform.value
-                )
-                
-                valid_items = [item for item in cleaned_items if item.source_url]
-                
-                await self._save_results(task_id, valid_items)
-                
+
+                # 逐条转换并立即写入 DB，前端可实时感知进度
+                total_count = len(raw_data_list)
+                success_count = 0
+                for i, item_dict in enumerate(raw_data_list):
+                    try:
+                        item = CleanedItem(**item_dict)
+                        if item.source_url:
+                            await self._save_single_result(task_id, keyword, item)
+                            success_count += 1
+                            print(f"  [{success_count}/{total_count}] {item.content[:80]}...", flush=True)
+                            # 每写入一条更新进度
+                            await self._update_task_progress(task_id, total_count, success_count)
+                    except Exception:
+                        pass
+
                 await self._update_task_completion(
                     task_id,
                     TaskStatus.COMPLETED,
-                    len(raw_data_list),
-                    len(valid_items),
+                    total_count,
+                    success_count,
                     0
                 )
-                
-                return CrawlResult(
-                    task_id=task_id,
-                    platform=platform,
-                    keyword=keyword,
-                    total=len(raw_data_list),
-                    success=len(valid_items),
-                    items=[item.model_dump() for item in valid_items],
-                    status=TaskStatus.COMPLETED
-                )
-                
+
+                msg = f"完成: {success_count}/{total_count} 条 {platform.value} 结果 (关键词: {keyword})"
+                await self._log_info(task_id, msg)
+                print(f"[SCHEDULER] {msg}", flush=True)
+
             except Exception as e:
                 error_message = str(e)
+                msg = f"failed: {platform.value} / {keyword}: {error_message}"
+                print(f"[SCHEDULER] {msg}", flush=True)
+                await self._log_error(task_id, msg)
                 await self._update_task_completion(
                     task_id,
                     TaskStatus.FAILED,
@@ -88,19 +93,34 @@ class TaskScheduler:
                     1,
                     error_message
                 )
-                
-                await self._log_error(task_id, error_message)
-                
-                return CrawlResult(
-                    task_id=task_id,
-                    platform=platform,
-                    keyword=keyword,
-                    total=0,
-                    success=0,
-                    items=[],
-                    status=TaskStatus.FAILED,
-                    error_message=error_message
-                )
+
+    async def execute_task(
+        self,
+        platform: Platform,
+        keyword: str,
+        max_count: int = 50,
+        progress_callback: Optional[Callable] = None
+    ) -> CrawlResult:
+        task_id = str(uuid4())
+        await self.execute_task_with_id(task_id, platform, keyword, max_count, progress_callback)
+
+        # Query results from DB
+        from database.connection import fetch_one, fetch_all
+        task = await fetch_one(
+            "SELECT * FROM crawl_task WHERE id = $1", task_id
+        )
+        items = await fetch_all(
+            "SELECT * FROM crawl_results WHERE crawl_task_id = $1", task_id
+        )
+        return CrawlResult(
+            task_id=task_id,
+            platform=platform,
+            keyword=keyword,
+            total=task["total_count"] or 0 if task else 0,
+            success=task["success_count"] or 0 if task else 0,
+            items=[dict(row) for row in (items or [])],
+            status=TaskStatus(task["status"]) if task else TaskStatus.FAILED,
+        )
     
     async def _retry_with_backoff(
         self,
@@ -188,38 +208,46 @@ class TaskScheduler:
                 task_id
             )
     
-    async def _save_results(self, task_id: str, items: list[CleanedItem]):
+    async def _save_single_result(self, task_id: str, keyword: str, item: CleanedItem):
         query = """
         INSERT INTO crawl_results
-            (task_id, platform, keyword, content, source_url, 
+            (platform, keyword, content, source_url,
              engagement, emotion_intensity, crawl_task_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         """
-        
         async with self.db_pool.acquire() as conn:
-            for item in items:
-                await conn.execute(
-                    query,
-                    str(uuid4()),
-                    item.platform,
-                    '',
-                    item.content,
-                    item.source_url,
-                    item.engagement,
-                    item.emotion_intensity,
-                    task_id
-                )
+            await conn.execute(
+                query,
+                item.platform,
+                keyword,
+                item.content[:500],
+                item.source_url,
+                item.engagement,
+                item.emotion_intensity,
+                task_id
+            )
+
+    async def _update_task_progress(self, task_id: str, total: int, success: int):
+        query = """
+        UPDATE crawl_task
+        SET total_count = $1, success_count = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        """
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(query, total, success, task_id)
     
+    async def _log_info(self, task_id: str, message: str):
+        query = """
+        INSERT INTO crawl_log (task_id, level, message)
+        VALUES ($1, $2, $3)
+        """
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(query, task_id, 'info', message)
+
     async def _log_error(self, task_id: str, error_message: str):
         query = """
         INSERT INTO crawl_log (task_id, level, message)
         VALUES ($1, $2, $3)
         """
-        
         async with self.db_pool.acquire() as conn:
-            await conn.execute(
-                query,
-                task_id,
-                'error',
-                error_message
-            )
+            await conn.execute(query, task_id, 'error', error_message)

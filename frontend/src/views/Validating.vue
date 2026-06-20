@@ -22,10 +22,10 @@
         </div>
         
         <div class="progress-detail">
-          <p v-if="currentStep === 0">正在抓取小红书数据...</p>
-          <p v-else-if="currentStep === 1">正在抓取知乎数据...</p>
-          <p v-else-if="currentStep === 2">正在分析需求可行性...</p>
-          <p v-else-if="currentStep === 3">正在生成报告...</p>
+          <p>{{ currentMessage || '准备中...' }}</p>
+          <p v-if="crawlCount > 0" class="crawl-count">
+            已抓取 <strong>{{ crawlCount }}</strong> 条数据
+          </p>
         </div>
         
         <div class="progress-bar">
@@ -47,14 +47,15 @@ const router = useRouter()
 
 const taskId = route.params.task_id
 const currentStep = ref(0)
+const crawlCount = ref(0)
+const currentMessage = ref('')
 const error = ref('')
 let eventSource = null
 
 const steps = [
-  '抓取小红书',
-  '抓取知乎',
-  '分析数据',
-  '生成报告'
+  '数据抓取',
+  'AI 分析',
+  '生成报告',
 ]
 
 const progressWidth = computed(() => {
@@ -85,13 +86,12 @@ function connectSSE() {
         error.value = data.message || '验证失败'
         eventSource.close()
       } else if (data.stage === 'crawling') {
-        if (data.platform === 'xiaohongshu') {
-          currentStep.value = 0
-        } else if (data.platform === 'zhihu') {
-          currentStep.value = 1
-        }
+        currentStep.value = 0
+        crawlCount.value = data.count || 0
+        currentMessage.value = data.message || ''
       } else if (data.stage === 'analyzing') {
-        currentStep.value = 2
+        currentStep.value = 1
+        currentMessage.value = '正在使用 AI 分析数据...'
       }
     } catch (err) {
       console.error('SSE parse error:', err)
@@ -210,6 +210,12 @@ h2 {
   height: 100%;
   background: #007AFF;
   transition: width 0.3s;
+}
+
+.crawl-count {
+  color: #007AFF;
+  font-size: 16px;
+  margin-top: 8px;
 }
 
 .error {
