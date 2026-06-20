@@ -206,6 +206,7 @@ async def run_validation(task_id: str, input_data: ProductInput):
 
 async def _save_report(report: ValidationReport):
     """保存报告到数据库"""
+    import json
     await execute_query(
         """
         INSERT INTO validation_reports
@@ -215,10 +216,10 @@ async def _save_report(report: ValidationReport):
         report.task_id,
         report.verdict,
         report.verdict_reason,
-        report.demand.model_dump() if report.demand else None,
-        report.feasibility.model_dump() if report.feasibility else None,
-        report.differentiation.model_dump() if report.differentiation else None,
-        report.risks.model_dump() if report.risks else None,
-        report.demand_heatmap,
-        report.data_stats,
+        json.dumps(report.demand.model_dump(), ensure_ascii=False) if report.demand else None,
+        json.dumps(report.feasibility.model_dump(), ensure_ascii=False) if report.feasibility else None,
+        json.dumps(report.differentiation.model_dump(), ensure_ascii=False) if report.differentiation else None,
+        json.dumps(report.risks.model_dump(), ensure_ascii=False) if report.risks else None,
+        json.dumps(report.demand_heatmap, ensure_ascii=False) if report.demand_heatmap else None,
+        json.dumps(report.data_stats, ensure_ascii=False) if report.data_stats else None,
     )

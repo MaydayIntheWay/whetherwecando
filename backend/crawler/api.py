@@ -43,7 +43,7 @@ async def _crawl_real(
     items_per_keyword: int,
     task_id: str = None,
 ) -> List[CleanedItem]:
-    """通过 MediaCrawlerAdapter 真实爬取，失败时自动 fallback 到 mock 数据"""
+    """通过 MediaCrawlerAdapter 流式爬取，逐条入库实现实时进度"""
     from datetime import datetime
     from .auth_manager import AuthManager
     from .media_crawler_adapter import MediaCrawlerAdapter
@@ -55,59 +55,65 @@ async def _crawl_real(
 
     all_items: List[CleanedItem] = []
     platforms = (Platform.XIAOHONGSHU, Platform.ZHIHU)
+    platform_map = {
+        Platform.XIAOHONGSHU: ("xhs", "xiaohongshu"),
+        Platform.ZHIHU: ("zhihu", "zhihu"),
+    }
 
     for keyword in keywords:
         for platform in platforms:
+            platform_code, platform_name = platform_map[platform]
             try:
-                msg = f"[CRAWL] 开始抓取 {platform.value} (关键词: {keyword})"
+                msg = f"[CRAWL] 开始抓取 {platform_name} (关键词: {keyword})"
                 print(msg, flush=True)
                 logger.info(msg)
-                raw_items = await adapter.crawl(
-                    platform=platform,
+
+                count = 0
+                async for item_dict in adapter.crawl_stream(
+                    platform_code=platform_code,
+                    platform_name=platform_name,
                     keyword=keyword,
                     max_count=items_per_keyword,
-                )
-                platform_items = []
-                for item_dict in raw_items:
+                ):
                     try:
                         item = CleanedItem(**item_dict)
-                        platform_items.append(item)
-                        all_items.append(item)
                     except Exception:
-                        pass
+                        continue
+                    all_items.append(item)
+                    count += 1
 
-                msg = f"[CRAWL] {platform.value} 完成 (关键词: {keyword}) → {len(platform_items)} 条"
-                print(msg, flush=True)
-                logger.info(msg)
+                    # 逐条打印到控制台
+                    content_preview = item.content[:80].replace("\n", " ")
+                    print(f"  [{count}] {content_preview}...", flush=True)
 
-                # 增量写入数据库，让前端能感知进度
-                if task_id and platform_items:
-                    now = datetime.now()
-                    for item in platform_items:
+                    # 逐条写入数据库，让前端 SSE 轮询能实时感知进度
+                    if task_id:
                         try:
                             await execute_query(
                                 """INSERT INTO crawl_results
-                                (task_id, platform, keyword, content, source_url, engagement, emotion_intensity, crawled_at)
-                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                                (task_id, platform, keyword, content, source_url, engagement, crawled_at)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7)""",
                                 task_id,
                                 item.platform,
                                 keyword,
                                 item.content[:500],
                                 item.source_url,
                                 item.engagement,
-                                item.emotion_intensity,
-                                now,
+                                datetime.now(),
                             )
-                        except Exception:
-                            pass
-                    print(f"[CRAWL] 已写入 {len(platform_items)} 条 {platform.value} 数据到数据库", flush=True)
+                        except Exception as e:
+                            print(f"  [CRAWL] DB写入失败: {e}", flush=True)
+
+                msg = f"[CRAWL] {platform_name} 完成 (关键词: {keyword}) → {count} 条"
+                print(msg, flush=True)
+                logger.info(msg)
 
             except ValueError as e:
-                msg = f"[CRAWL] 跳过 {platform.value} (关键词={keyword}): {e}"
+                msg = f"[CRAWL] 跳过 {platform_name} (关键词={keyword}): {e}"
                 print(msg, flush=True)
                 logger.warning(msg)
             except Exception as e:
-                msg = f"[CRAWL] {platform.value} 失败 (关键词={keyword}): {e}"
+                msg = f"[CRAWL] {platform_name} 失败 (关键词={keyword}): {e}"
                 print(msg, flush=True)
                 logger.error(msg)
 

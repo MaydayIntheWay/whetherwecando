@@ -60,7 +60,7 @@ class DataTransformer:
         )
 
     def transform_zhihu_question(self, question_data: dict) -> Optional[CleanedItem]:
-        content_id = question_data.get('content_id') or question_data.get('id')
+        content_id = question_data.get('content_id') or question_data.get('id') or question_data.get('question_id')
         if not content_id:
             return None
 

@@ -45,28 +45,27 @@ class TaskScheduler:
                 await self._log_info(task_id, f"开始爬取 {platform.value} / {keyword}")
                 print(f"[SCHEDULER] 开始: {platform.value} / {keyword}", flush=True)
 
-                raw_data_list = await self._retry_with_backoff(
-                    self.adapter.crawl,
-                    platform,
-                    keyword,
-                    max_count,
-                    progress_callback
-                )
+                platform_code = "xhs" if platform == Platform.XIAOHONGSHU else "zhihu"
+                platform_name = platform.value
 
-                # 逐条转换并立即写入 DB，前端可实时感知进度
-                total_count = len(raw_data_list)
                 success_count = 0
-                for i, item_dict in enumerate(raw_data_list):
+                total_count = 0
+                async for item_dict in self.adapter.crawl_stream(
+                    platform_code=platform_code,
+                    platform_name=platform_name,
+                    keyword=keyword,
+                    max_count=max_count,
+                ):
+                    total_count += 1
                     try:
                         item = CleanedItem(**item_dict)
                         if item.source_url:
                             await self._save_single_result(task_id, keyword, item)
                             success_count += 1
                             print(f"  [{success_count}/{total_count}] {item.content[:80]}...", flush=True)
-                            # 每写入一条更新进度
                             await self._update_task_progress(task_id, total_count, success_count)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"  [SCHEDULER] DB写入失败 #{total_count}: {e}", flush=True)
 
                 await self._update_task_completion(
                     task_id,
@@ -212,8 +211,8 @@ class TaskScheduler:
         query = """
         INSERT INTO crawl_results
             (platform, keyword, content, source_url,
-             engagement, emotion_intensity, crawl_task_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+             engagement, crawl_task_id, crawled_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
         """
         async with self.db_pool.acquire() as conn:
             await conn.execute(
@@ -223,7 +222,6 @@ class TaskScheduler:
                 item.content[:500],
                 item.source_url,
                 item.engagement,
-                item.emotion_intensity,
                 task_id
             )
 

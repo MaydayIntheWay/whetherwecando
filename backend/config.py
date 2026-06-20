@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     # 爬虫配置
     crawler_headless: bool = True
+    crawler_zhihu_headless: bool = True  # 知乎反爬更严格，可单独关闭 headless
 
     # Mock模式（MediaCrawler不可用时使用模拟数据）
     use_mock_crawler: bool = False

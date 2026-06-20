@@ -72,7 +72,23 @@ class MediaCrawlerRunner:
         mc_dir = os.path.abspath(media_crawler_dir)
         runner_script_path = os.path.join(output_dir, "_mc_runner.py")
 
-        headless_bool = os.environ.get("CRAWLER_HEADLESS", "true").lower() not in ("false", "0", "no")
+        # 知乎反爬更严格，允许独立配置 headless 模式
+        if platform == "zhihu":
+            headless_bool = os.environ.get("CRAWLER_ZHIHU_HEADLESS", os.environ.get("CRAWLER_HEADLESS", "true")).lower() not in ("false", "0", "no")
+        else:
+            headless_bool = os.environ.get("CRAWLER_HEADLESS", "true").lower() not in ("false", "0", "no")
+
+        # 知乎需要 Node.js 做 API 签名，在 runner 脚本中提前检查
+        node_check = ""
+        if platform == "zhihu":
+            node_check = """
+import subprocess as _sp
+try:
+    _sp.run(["node", "--version"], capture_output=True, check=True)
+except Exception:
+    print("[ERROR] Node.js 未安装，知乎爬取需要 Node.js 用于 API 签名", flush=True)
+    sys.exit(2)
+"""
 
         with open(runner_script_path, "w", encoding="utf-8") as f:
             f.write(f'''\
@@ -80,7 +96,7 @@ import sys, os
 sys.path.insert(0, {json.dumps(mc_dir)})
 # 清理 argv 避免 Typer 解析垃圾参数导致 SystemExit
 sys.argv = [sys.argv[0]]
-
+{node_check}
 import config
 
 # 在导入任何 MediaCrawler 模块之前设置所有配置
@@ -133,11 +149,20 @@ asyncio.run(_run())
                 timeout=self.timeout,
             )
 
+            stderr_text = stderr.decode("utf-8", errors="ignore")
+            stdout_text = stdout.decode("utf-8", errors="ignore")
+
+            if stderr_text:
+                print(f"[SUBPROCESS STDERR] {platform}:{keyword}\n{stderr_text}", flush=True)
+            if stdout_text:
+                preview = stdout_text[:2000]
+                if len(stdout_text) > 2000:
+                    preview += f"\n... (共 {len(stdout_text)} 字符，已截断)"
+                print(f"[SUBPROCESS STDOUT] {platform}:{keyword}\n{preview}", flush=True)
+
             if process.returncode != 0:
-                error_msg = stderr.decode("utf-8", errors="ignore")
-                stdout_msg = stdout.decode("utf-8", errors="ignore")
                 raise RuntimeError(
-                    f"爬虫执行失败（exit={process.returncode}）：{error_msg}\\n{stdout_msg}"
+                    f"爬虫执行失败（exit={process.returncode}）：{stderr_text}\\n{stdout_text}"
                 )
 
             return True

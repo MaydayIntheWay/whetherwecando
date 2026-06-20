@@ -220,12 +220,26 @@ class AuthManager:
         """本地格式校验（真实验证依赖平台 API 在爬虫运行时完成）"""
         if not cookie or len(cookie.strip()) < 20:
             return False
-        # 检查是否为 key=value; key=value 格式
         if "=" not in cookie:
             return False
-        # 至少要有几个常见字段
         pairs = [p.strip() for p in cookie.split(";") if p.strip()]
         if len(pairs) < 2:
             return False
         has_key = any("=" in p and p.split("=", 1)[0].strip() for p in pairs)
-        return has_key
+        if not has_key:
+            return False
+
+        # 知乎需要 d_c0（API 签名）和 z_c0（登录验证）
+        if platform == "zhihu":
+            cookie_lower = cookie.lower()
+            has_d_c0 = "d_c0=" in cookie_lower
+            has_z_c0 = "z_c0=" in cookie_lower
+            if not has_d_c0:
+                print(f"[AUTH] 知乎 Cookie 缺少 d_c0（API 签名必需），请从浏览器复制完整 Cookie", flush=True)
+                return False
+            if not has_z_c0:
+                print(f"[AUTH] 知乎 Cookie 缺少 z_c0（登录验证必需），请从浏览器复制完整 Cookie", flush=True)
+                return False
+            return True
+
+        return True
